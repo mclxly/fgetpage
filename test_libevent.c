@@ -27,7 +27,7 @@ void run_base_with_ticks(struct event_base *base)
 {
 	struct timeval ten_sec;
 	
-	ten_sec.tv_sec = 10;
+	ten_sec.tv_sec = 2;
 	ten_sec.tv_usec = 0;
 	
 	/* Now we run the event_base for a series of 10-second intervals, printing
@@ -40,6 +40,13 @@ void run_base_with_ticks(struct event_base *base)
 		puts("|");
 		event_base_dispatch(base);
 		puts("Tick");
+
+		// --------------
+		FILE * pFile;	
+		pFile = fopen ("myfile.txt" , "a+");
+		if (pFile == NULL) perror ("Error opening file");
+		event_base_dump_events(base, pFile);
+		fclose (pFile);
 	}
 }
 
@@ -82,6 +89,7 @@ int main(int argc, char **argv)
 	//fprintf(MSG_OUT, "max npriorities: %d\n", n);
 
 	run_base_with_ticks(evbase);
+	
 
 	event_base_free(evbase);
 	return 0;
