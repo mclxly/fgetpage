@@ -57,6 +57,14 @@ callback.
 
   LD_LIBRARY_PATH=/usr/libevent/lib ./a.out
 
+
+  CREATE TABLE `writers` (
+  `name` TEXT NULL,
+  `size` INT UNSIGNED NOT NULL DEFAULT '0'
+  )
+  COLLATE='gb2312_bin'
+  ENGINE=MyISAM
+ROW_FORMAT=DEFAULT
 */
 
 #include <stdio.h>
@@ -181,11 +189,17 @@ static void check_multi_info(GlobalInfo *g)
 
 	  // -------------------
 	  //printf("len: %d = body: %s\n", conn->cont_len, conn->content);
+	  char sztt[32] = {0};
+	  sprintf(sztt, "%d", conn->cont_len);
+
 	  char query[MAX_WEBPAGE_SIZE], *end;
 	  end = strmov(query, "INSERT IGNORE INTO writers VALUES(");
 	  *end++ = '\'';
 	  end += mysql_real_escape_string(g_pConn, end, (const char*)conn->content, conn->cont_len);
 	  *end++ = '\'';
+	  *end++ = ',';
+	  strncpy(end, sztt, strlen(sztt));
+	  end += strlen(sztt);
 	  *end++ = ')';
 	  //printf("sql: %s\n", query);
 	  
