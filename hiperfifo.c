@@ -57,14 +57,15 @@ callback.
 
   LD_LIBRARY_PATH=/usr/libevent/lib ./a.out
 
-
   CREATE TABLE `writers` (
   `name` TEXT NULL,
-  `size` INT UNSIGNED NOT NULL DEFAULT '0'
+  `size` INT(10) UNSIGNED NOT NULL DEFAULT '0',
+  `ts` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
-  COLLATE='gb2312_bin'
+  COLLATE='utf8_general_ci'
   ENGINE=MyISAM
 ROW_FORMAT=DEFAULT
+
 */
 
 #include <stdio.h>
@@ -193,7 +194,7 @@ static void check_multi_info(GlobalInfo *g)
 	  sprintf(sztt, "%d", conn->cont_len);
 
 	  char query[MAX_WEBPAGE_SIZE], *end;
-	  end = strmov(query, "INSERT IGNORE INTO writers VALUES(");
+	  end = strmov(query, "INSERT IGNORE INTO writers (name,size) VALUES(");
 	  *end++ = '\'';
 	  end += mysql_real_escape_string(g_pConn, end, (const char*)conn->content, conn->cont_len);
 	  *end++ = '\'';
@@ -518,7 +519,8 @@ int main(int argc, char **argv)
 	//printf("MySQL client version: %s\n", mysql_get_client_info());return 0;		
 	g_pConn = mysql_init(NULL);
 	mysql_real_connect(g_pConn, "192.168.4.192", "root", "123456", "mydomain", 0, NULL, 0);
-	
+	mysql_query(g_pConn, "INSERT INTO writers (name,size) VALUES('start running', 9)");
+
 	/*
 	mysql_query(conn, "CREATE TABLE writers(name VARCHAR(25))");
 	
@@ -558,6 +560,7 @@ int main(int argc, char **argv)
   event_base_free(g.evbase);
   curl_multi_cleanup(g.multi);
 
+  mysql_query(g_pConn, "INSERT INTO writers (name,size) VALUES('done!', 9)");
   mysql_close(g_pConn);
   return 0;
 }
