@@ -1,0 +1,25 @@
+http://wiki.postgresql.org/wiki/YUM_Installation
+http://blog.egrovesys.com/web-server/how-to-install-and-configure-postgresql-on-centosrhel
+
+默认配置文件在：/var/lib/pgsql/data/postgresql.conf
+
+1. yum install postgresql-server postgresql postgresql-devel
+2. service postgresql initdb
+3. chkconfig postgresql on
+4. service postgresql start
+5. vim /var/lib/pgsql/data/postgresql.conf
+listen_addresses = ‘*’
+port = 5432
+
+6. su postgres
+7. createdb test
+8. psql test
+7. CREATE ROLE pguser WITH SUPERUSER LOGIN PASSWORD '123456';
+
+CREATE TABLE writers (
+	name TEXT not NULL,
+	size integer NOT NULL DEFAULT 0,
+	ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+
+8. vim /var/lib/pgsql/data/pg_hba.conf

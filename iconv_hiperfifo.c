@@ -238,79 +238,60 @@ static void check_multi_info(GlobalInfo *g)
 		fprintf(MSG_OUT,"+");
 	  }	  
 #else
-	  static char content[MAX_WEBPAGE_SIZE] = {'\0'};	  
+	  static char content[MAX_WEBPAGE_SIZE] = {'\0'};
+	  static char sz_temp[MAX_WEBPAGE_SIZE] = {'\0'};
 	  static char query[MAX_WEBPAGE_SIZE] = {'\0'};
 	  int flag = 0;
 
-	  memset(content, '\0', MAX_WEBPAGE_SIZE);	  
+	  memset(content, '\0', MAX_WEBPAGE_SIZE);
+	  memset(sz_temp, '\0', MAX_WEBPAGE_SIZE);
 	  memset(query, '\0', MAX_WEBPAGE_SIZE);
 
-	  int len = htonl(conn->cont_len);
-	  //set the values to use
-	  const char *values[2] = {conn->content, (char *)&len};
-	  //calculate the lengths of each of the values
-	  int lengths[2] = {len, sizeof(len)};
-	  //state which parameters are binary
-	  int binary[2] = {0, 1};
+	  // ----------------------------------
+	  // convert string
+	  char *inp = conn->content;
+      char *outp = sz_temp;
+	  size_t insize = conn->cont_len, outsize = MAX_WEBPAGE_SIZE;
+	  iconv_t cd = iconv_open("utf-8", "gb2312");
+	  size_t ret = iconv(cd, &inp, &insize, &outp, &outsize);	
 
-	  PGresult *res = PQexecParams(g_pConn,
-		  "INSERT INTO writers (name,size) VALUES($1::text, $2::int)",
-		  //"SELECT person_id, name FROM person WHERE person_id != $1::int4 and name = $2::varchar",
-		  2, //number of parameters
-		  NULL, //ignore the Oid field
-		  values, //values to substitute $1 and $2
-		  lengths, //the lengths, in bytes, of each of the parameter values
-		  binary, //whether the values are binary or not
-		0); //we want the result in text format
+      if (ret != (size_t)-1 && insize == 0) {
+		  int error = 0;
+		  size_t write_size = PQescapeStringConn (g_pConn, content, sz_temp, 
+			  strlen(sz_temp), &error);
 
-	  ExecStatusType st = PQresultStatus(res);
-	  //if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-	  if ( st != PGRES_COMMAND_OK) {	
-		  puts( PQresStatus(st) );
-		  puts( PQresultErrorMessage(res) );
-		  puts( "command error! insert" );			  
-		}
-/*
-	  size_t to_length = 0;
-	  unsigned char* tbuf = PQescapeByteaConn (g_pConn, (const unsigned char *)conn->content, 
-				conn->cont_len, &to_length);
-	  puts( (const char *)tbuf );
-	  PQfreemem (tbuf);
+		  if (error == 0)
+		  {
+			  content[write_size+1] = '\0';
+			  
+			  sprintf(query, "INSERT INTO writers (name,size) VALUES('%s',%d)",
+				  content, conn->cont_len);	  
+			  
+			  PGresult   *res;
+			  res = PQexec(g_pConn, query);
+			  ExecStatusType st = PQresultStatus(res);
+			  //if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+			  if ( st != PGRES_COMMAND_OK) {	
+				  puts( PQresStatus(st) );
+				  puts( PQresultErrorMessage(res) );
+				  puts( "command error! insert" );	
+				  puts( query );
+			  }
 
-/*
-	  int error = 0;
-	  size_t write_size = PQescapeStringConn (g_pConn, content, conn->content, 
-		  conn->cont_len, &error);
-
-	  if (error == 0)
-	  {
-		  content[write_size+1] = '\0';
-		  
-		  sprintf(query, "INSERT INTO writers (name,size) VALUES('%s',%d)",
-			  content, conn->cont_len);	  
-		  
-		  PGresult   *res;
-		  res = PQexec(g_pConn, query);
-		  ExecStatusType st = PQresultStatus(res);
-		  //if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-		  if ( st != PGRES_COMMAND_OK) {	
-			  puts( PQresStatus(st) );
-			  puts( PQresultErrorMessage(res) );
-			  puts( "command error! insert" );	
-			  puts( query );
-		  }
-
-		  flag = 1;	  	  
+			  flag = 1;
+		  }		  
 	  } else {
 		  fprintf(stderr, "Failed iconv()!");	
-	  }	  
+	  }
+
+	  iconv_close(cd);
+	  // ----------------------------------	   	
 
 	  if (flag) {
 		fprintf(MSG_OUT,"+");
 	  } else {
 		fprintf(stderr,"-");
 	  }
-*/
 #endif
 
       curl_multi_remove_handle(g->multi, easy);
@@ -652,7 +633,8 @@ int main(int argc, char **argv)
 	mysql_real_connect(g_pConn, "192.168.4.192", "root", "123456", "mydomain", 0, NULL, 0);	
 #else
 	g_pConn = PQconnectdb("host='192.168.21.90' port='5432' dbname='test' user='pguser' password='123456' connect_timeout='1000'");
-	if(0 != PQsetClientEncoding(g_pConn, "EUC_CN"))		fprintf(MSG_OUT, "PQsetClientEncoding() failed");
+	if(0 != PQsetClientEncoding(g_pConn, "UTF-8"))
+		fprintf(MSG_OUT, "PQsetClientEncoding() failed");
 #endif	
 
 	/*
