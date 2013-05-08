@@ -91,7 +91,7 @@ with ROLLUP
 #define MSG_OUT stdout /* Send info to stdout, change to stderr if you want */
 #define MAX_WEBPAGE_SIZE 500*1024 // max webpage size = 500KB
 //#define DEBUG
-//#define MYSQL_DB
+#define MYSQL_DB
 
 #ifdef MYSQL_DB
 	#include <my_global.h>
@@ -591,6 +591,7 @@ static void fifo_cb(int fd, short event, void *arg)
   }
 #endif	  
 
+  int counter = 0;
   do {
     s[0]='\0';
     rv=fscanf(g->input, "%1023s%n", s, &n);
@@ -598,6 +599,8 @@ static void fifo_cb(int fd, short event, void *arg)
     if ( n && s[0] ) {
 	  fprintf(MSG_OUT, ".");	
       new_conn(s,g);  /* if we read a URL, go get it! */
+      
+      if (++counter > 200) {puts("return."); return;}
     } else break;
   } while ( rv != EOF);
 }
@@ -630,8 +633,10 @@ static int init_fifo (GlobalInfo *g)
   g->input = fdopen(sockfd, "r");
 
   fprintf(MSG_OUT, "Now, pipe some URL's into > %s\n", fifo);
-  g->fifo_event = event_new(g->evbase, sockfd, EV_READ|EV_PERSIST, fifo_cb, g);
-  event_add(g->fifo_event, NULL);
+  //g->fifo_event = event_new(g->evbase, sockfd, EV_READ|EV_PERSIST, fifo_cb, g);
+  g->fifo_event = event_new(g->evbase, sockfd, EV_PERSIST, fifo_cb, g);
+  struct timeval mytimer = {3,0};
+  event_add(g->fifo_event, &mytimer);
   return (0);
 }
 
@@ -644,6 +649,8 @@ static void clean_fifo(GlobalInfo *g)
 
 int main(int argc, char **argv)
 {
+	setbuf(stdout, NULL);
+
 	//setlocale (LC_ALL, "nl_NL.utf8" );
 
 #ifdef MYSQL_DB
