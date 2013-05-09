@@ -66,10 +66,18 @@ callback.
   ENGINE=MyISAM
 ROW_FORMAT=DEFAULT
 
+24*60*60=86400
 
   select ts, sum(size)/1000 as 'KB',count(name) as 'URLs'  from `writers`
   group by `ts`
 with ROLLUP
+
+select min(ts) from writers
+where size > 0
+union
+select max(ts) from writers
+where size > 0
+
 */
 
 #include <stdio.h>
@@ -90,6 +98,9 @@ with ROLLUP
 
 #define MSG_OUT stdout /* Send info to stdout, change to stderr if you want */
 #define MAX_WEBPAGE_SIZE 500*1024 // max webpage size = 500KB
+#define MAX_PARALLEL_WORKER 150*3 // 12M / 8 = 1.5M * 1000 / 60 = 25
+#define READ_TIMER_SECONDS 4
+
 //#define DEBUG
 #define MYSQL_DB
 
@@ -105,7 +116,9 @@ with ROLLUP
 	PGconn *g_pConn = NULL;
 #endif
 
-
+// --------------------------------
+// global var
+long  g_share_counter = 0;
 
 /* Global information, common to all connections */
 typedef struct _GlobalInfo
@@ -219,8 +232,12 @@ static void check_multi_info(GlobalInfo *g)
 	  char sztt[32] = {'\0'};
 	  sprintf(sztt, "%d", conn->cont_len);
 	  
-	  char query[MAX_WEBPAGE_SIZE], *end;
-	  end = strmov(query, "INSERT IGNORE INTO writers (name,size) VALUES(");
+	  static char query[MAX_WEBPAGE_SIZE], *end;
+		memset(query, '\0', MAX_WEBPAGE_SIZE);
+	  //end = strmov(query, "INSERT IGNORE INTO writers (name,size) VALUES(");
+		
+		end = strcpy(query, "INSERT IGNORE INTO writers (name,size) VALUES(");
+		end += strlen (end);
 	  *end++ = '\'';
 	  end += mysql_real_escape_string(g_pConn, end, (const char*)conn->content, conn->cont_len);
 	  *end++ = '\'';
@@ -277,7 +294,7 @@ static void check_multi_info(GlobalInfo *g)
 	  puts( (const char *)tbuf );
 	  PQfreemem (tbuf);
 
-/*
+///*
 	  int error = 0;
 	  size_t write_size = PQescapeStringConn (g_pConn, content, conn->content, 
 		  conn->cont_len, &error);
@@ -317,6 +334,11 @@ static void check_multi_info(GlobalInfo *g)
       free(conn->url);
       curl_easy_cleanup(easy);
       free(conn);	  
+			
+			//__sync_fetch_and_sub(&g_share_counter, 1);
+#ifdef DEBUG
+    fprintf(MSG_OUT, "free(conn)");
+#endif
     }
   }
 }
@@ -593,14 +615,27 @@ static void fifo_cb(int fd, short event, void *arg)
 
   int counter = 0;
   do {
+		//mysql_query(g_pConn, "INSERT INTO writers (name,size) VALUES('do', 1)");
+		
     s[0]='\0';
     rv=fscanf(g->input, "%1023s%n", s, &n);
     s[n]='\0';
-    if ( n && s[0] ) {
-	  fprintf(MSG_OUT, ".");	
+		
+    if ( n && s[0] ) {		
+			/*
+			if (g_share_counter >= MAX_PARALLEL_WORKER) {
+				sleep(2);
+				//__sync_fetch_and_sub(&g_share_counter, 1);
+				g_share_counter = 0;
+				fprintf(MSG_OUT, "sleep.");
+			}*/
+			fprintf(MSG_OUT, ".");
       new_conn(s,g);  /* if we read a URL, go get it! */
-      
-      if (++counter > 200) {puts("return."); return;}
+
+			if (++counter > 120) {puts("return."); return;}
+			//fprintf(MSG_OUT, "new_conn.");
+			//__sync_fetch_and_add(&g_share_counter, 1);
+			//mysql_query(g_pConn, "INSERT INTO writers (name,size) VALUES('new conn', 1)");
     } else break;
   } while ( rv != EOF);
 }
@@ -633,9 +668,9 @@ static int init_fifo (GlobalInfo *g)
   g->input = fdopen(sockfd, "r");
 
   fprintf(MSG_OUT, "Now, pipe some URL's into > %s\n", fifo);
-  //g->fifo_event = event_new(g->evbase, sockfd, EV_READ|EV_PERSIST, fifo_cb, g);
+    //g->fifo_event = event_new(g->evbase, sockfd, EV_READ|EV_PERSIST, fifo_cb, g);
   g->fifo_event = event_new(g->evbase, sockfd, EV_PERSIST, fifo_cb, g);
-  struct timeval mytimer = {3,0};
+  struct timeval mytimer = {READ_TIMER_SECONDS,0};
   event_add(g->fifo_event, &mytimer);
   return (0);
 }
@@ -649,14 +684,15 @@ static void clean_fifo(GlobalInfo *g)
 
 int main(int argc, char **argv)
 {
-	setbuf(stdout, NULL);
-
 	//setlocale (LC_ALL, "nl_NL.utf8" );
-
+	setbuf(stdout, NULL); // Disable buffering
+	
 #ifdef MYSQL_DB
 	//printf("MySQL client version: %s\n", mysql_get_client_info());return 0;		
 	g_pConn = mysql_init(NULL);
-	mysql_real_connect(g_pConn, "192.168.4.192", "root", "123456", "mydomain", 0, NULL, 0);	
+	//mysql_real_connect(g_pConn, "192.168.4.192", "root", "123456", "mydomain", 0, NULL, 0);	
+	//mysql_real_connect(g_pConn, "localhost", "root", "30083012", "mydomain", 0, NULL, 0);	
+	mysql_real_connect(g_pConn, "192.168.1.102", "root", "123456", "test", 0, NULL, 0);	
 #else
 	g_pConn = PQconnectdb("host='192.168.21.90' port='5432' dbname='test' user='pguser' password='123456' connect_timeout='1000'");
 	if(0 != PQsetClientEncoding(g_pConn, "EUC_CN"))		fprintf(MSG_OUT, "PQsetClientEncoding() failed");
