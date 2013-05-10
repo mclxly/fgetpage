@@ -101,7 +101,7 @@ where size > 0
 #define MAX_PARALLEL_WORKER 150*3 // 12M / 8 = 1.5M * 1000 / 60 = 25
 #define READ_TIMER_SECONDS 4
 
-#define DEBUG
+//#define DEBUG
 #define MYSQL_DB
 
 #ifdef MYSQL_DB
@@ -337,7 +337,7 @@ static void check_multi_info(GlobalInfo *g)
 
 #ifdef DEBUG			
 			__sync_fetch_and_sub(&g_share_counter, 1);
-		fprintf(MSG_OUT, "free(conn) counter:%l", g_share_counter);    
+		fprintf(MSG_OUT, "free(conn) counter:%ld", g_share_counter);    
 #endif
     }
   }
@@ -635,7 +635,7 @@ static void fifo_cb(int fd, short event, void *arg)
 			if (++counter > 120) {puts("return."); return;}
 
 #ifdef DEBUG			
-			fprintf(MSG_OUT, "new_conn() counter:%l", g_share_counter);
+			fprintf(MSG_OUT, "new_conn() counter:%ld", g_share_counter);
 			__sync_fetch_and_add(&g_share_counter, 1);
 #endif			
 			
@@ -694,9 +694,9 @@ int main(int argc, char **argv)
 #ifdef MYSQL_DB
 	//printf("MySQL client version: %s\n", mysql_get_client_info());return 0;		
 	g_pConn = mysql_init(NULL);
-	//mysql_real_connect(g_pConn, "192.168.4.192", "root", "123456", "mydomain", 0, NULL, 0);	
+	mysql_real_connect(g_pConn, "192.168.4.192", "root", "123456", "mydomain", 0, NULL, 0);	
 	//mysql_real_connect(g_pConn, "localhost", "root", "30083012", "mydomain", 0, NULL, 0);	
-	mysql_real_connect(g_pConn, "192.168.1.102", "root", "123456", "test", 0, NULL, 0);	
+	//mysql_real_connect(g_pConn, "192.168.1.102", "root", "123456", "test", 0, NULL, 0);	
 #else
 	g_pConn = PQconnectdb("host='192.168.21.90' port='5432' dbname='test' user='pguser' password='123456' connect_timeout='1000'");
 	if(0 != PQsetClientEncoding(g_pConn, "EUC_CN"))		fprintf(MSG_OUT, "PQsetClientEncoding() failed");
@@ -727,6 +727,7 @@ int main(int argc, char **argv)
   curl_multi_setopt(g.multi, CURLMOPT_SOCKETDATA, &g);
   curl_multi_setopt(g.multi, CURLMOPT_TIMERFUNCTION, multi_timer_cb);
   curl_multi_setopt(g.multi, CURLMOPT_TIMERDATA, &g);
+	//curl_multi_setopt(g.multi, CURLMOPT_PIPELINING, 1L);	
 
   /* we don't call any curl_multi_socket*() function yet as we have no handles
      added! */
@@ -740,7 +741,8 @@ int main(int argc, char **argv)
   event_free(g.timer_event);
   event_base_free(g.evbase);
   curl_multi_cleanup(g.multi);
-
+	libevent_global_shutdown();
+	
 #ifdef MYSQL_DB
   //mysql_query(g_pConn, "INSERT INTO writers (name,size) VALUES('done!', 9)");
   mysql_close(g_pConn);
