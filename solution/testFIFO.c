@@ -56,14 +56,21 @@ static void fifo_write(evutil_socket_t fd, short event, void *arg)
 	char buf[255];
 	int len;
 	struct event *ev = evfifo;
+	struct event_base *base = get_event_base(ev);
+  struct webpage_data a = {23, 89};
 
-	fprintf(stderr, "fifo_read called with fd: %d, event: %d, arg: %p\n",
+	fprintf(stderr, "fifo_write called with fd: %d, event: %d, arg: %p\n",
 	    (int)fd, event, arg);
-	sprintf(buf, "fifo_read called with fd: %d, event: %d, arg: %p\n",
+	sprintf(buf, "fifo_write called with fd: %d, event: %d, arg: %p\n",
 	    (int)fd, event, arg);		
 	
-	int num_bytes = write(fd, routing_table, sizeof(routing_table));	
-	fwrite(&message, 1,4,file);
+	int num_bytes = write(fd, &a, sizeof(webpage_data));	
+	
+	fprintf(stderr, "fifo_write called with fd: %d, event: %d, arg: %p num_bytes_write: %d\n",
+	    (int)fd, event, arg, num_bytes);
+	//fwrite(&message, 1,4,file);
+	
+	//event_base_loopbreak(base);
 }
 
 /* On Unix, cleanup urls_list.fifo if SIGINT is received. */
@@ -90,14 +97,15 @@ int main(int argc, char **argv)
 			exit(1);
 		}
 	}
-
+/*
 	unlink(fifo);
 	if (mkfifo(fifo, 0600) == -1) {
 		perror("mkfifo");
 		exit(1);
 	}
-
-	socket = open(fifo, O_RDONLY | O_NONBLOCK, 0);
+*/
+	//socket = open(fifo, O_RDONLY | O_NONBLOCK, 0);
+	socket = open(fifo, O_WRONLY | O_NONBLOCK, 0);
 
 	if (socket == -1) {
 		perror("open");
@@ -115,12 +123,13 @@ int main(int argc, char **argv)
 	event_add(signal_int, NULL);
 
 	//evfifo = event_new(base, socket, EV_READ|EV_PERSIST, fifo_read, evfifo);
-	evfifo = event_new(base, socket, EV_WRITE|EV_PERSIST, fifo_write, evfifo);
+	evfifo = event_new(base, socket, EV_WRITE, fifo_write, evfifo);
 	
 	/* Add it to the active events, without a timeout */
 	event_add(evfifo, NULL);	
 
-	event_base_dispatch(base);
+	event_base_loop(base, EVLOOP_ONCE); 
+	//event_base_dispatch(base);
 	event_base_free(base);
 
 	close(socket);
