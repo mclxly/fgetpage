@@ -63,7 +63,12 @@ callback.
 #define DEBUG
 
 #define MSG_OUT stdout /* Send info to stdout, change to stderr if you want */
-
+#define MAX_WEBPAGE_SIZE 500*1024 // max webpage size
+#define MID_WEBPAGE_SIZE 100*1024 // middle webpage size
+#define MIN_WEBPAGE_SIZE 50*1024 // min webpage size
+#define MAX_PARALLEL_WORKER 150*3 // 12M / 8 = 1.5M * 1000 / 60 = 25
+#define READ_TIMER_SECONDS 4
+#define WEBPAGE_BUF_SIZE 200
 
 /* Global information, common to all connections */
 typedef struct _GlobalInfo
@@ -84,6 +89,7 @@ typedef struct _ConnInfo
   char *url;
   GlobalInfo *global;
   char error[CURL_ERROR_SIZE];
+	int buf_id;
 } ConnInfo;
 
 
@@ -99,12 +105,27 @@ typedef struct _SockInfo
   GlobalInfo *global;
 } SockInfo;
 
+typedef struct _MaxBufWebPage
+{
+	char content[MAX_WEBPAGE_SIZE];  
+  int cont_len;
+	int flag;				// available?
+} MaxBufWebPage;
+
+// --------------------------------
+// global var
+static long  				g_share_counter = 0;
+static const char 	*read_fifo = "urls_list.fifo";
+static MaxBufWebPage g_maxBufWebPage[WEBPAGE_BUF_SIZE] = {0};
+
 static void timer_cb(EV_P_ struct ev_timer *w, int revents);
 
 /* Update the event timer after curl_multi library calls */
 static int multi_timer_cb(CURLM *multi, long timeout_ms, GlobalInfo *g)
 {
+#ifdef DEBUG
   DPRINT("%s %li\n", __PRETTY_FUNCTION__,  timeout_ms);
+#endif
   ev_timer_stop(g->loop, &g->timer_event);
   if (timeout_ms > 0)
   {
@@ -155,14 +176,26 @@ static void check_multi_info(GlobalInfo *g)
   CURL *easy;
   CURLcode res;
 
+#ifdef DEBUG
   fprintf(MSG_OUT, "REMAINING: %d\n", g->still_running);
+#endif
+
   while ((msg = curl_multi_info_read(g->multi, &msgs_left))) {
     if (msg->msg == CURLMSG_DONE) {
       easy = msg->easy_handle;
       res = msg->data.result;
       curl_easy_getinfo(easy, CURLINFO_PRIVATE, &conn);
       curl_easy_getinfo(easy, CURLINFO_EFFECTIVE_URL, &eff_url);
+#ifdef DEBUG
       fprintf(MSG_OUT, "DONE: %s => (%d) %s\n", eff_url, res, conn->error);
+#endif
+
+/*************************************************
+	Save web page to Memcached.
+*************************************************/
+// ----------------------------------------------start
+// ----------------------------------------------end
+
       curl_multi_remove_handle(g->multi, easy);
       free(conn->url);
       curl_easy_cleanup(easy);
@@ -291,7 +324,7 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *data)
   (void)ptr;
   (void)conn;
 	
-	printf("len: %d body: %s\n", conn->cont_len, conn->content);  
+	//printf("len: %d body: %s\n", conn->cont_len, conn->content);  
 	
   return realsize;
 }
@@ -309,16 +342,45 @@ static int prog_cb (void *p, double dltotal, double dlnow, double ult,
   return 0;
 }
 
+static int get_free_buf_id()
+{
+	int i = 0, idx = 0;
+	while(i++ < 10) {
+		idx = 1+(int)(WEBPAGE_BUF_SIZE*1.0*rand()/(RAND_MAX+1.0)) - 1; // [0, WEBPAGE_BUF_SIZE-1]
+		
+		//int *a = &g_maxBufWebPage[idx].flag;
+		//*a = 3000;
+		//return g_maxBufWebPage[idx].flag;
+		
+		if (0 == g_maxBufWebPage[idx].flag) {
+			if (__sync_bool_compare_and_swap(&g_maxBufWebPage[idx].flag, 0, 1)) return idx;
+			else {
+				fprintf(MSG_OUT, "error: %d!\n", g_maxBufWebPage[idx].flag);exit;
+				continue;
+			}
+		}
+		
+		fprintf(MSG_OUT, "error: %d!\n", g_maxBufWebPage[idx].flag);exit;
+	}
+	return -1;
+}
 
 /* Create a new easy handle, and add it to the global curl_multi */
 static void new_conn(char *url, GlobalInfo *g )
 {
   ConnInfo *conn;
   CURLMcode rc;
+	
+	int idx = get_free_buf_id();
+	if (idx == -1) {
+		fprintf(MSG_OUT, "Do nothing because buffer is full!\n");
+		return;
+	}
 
   conn = calloc(1, sizeof(ConnInfo));
   memset(conn, 0, sizeof(ConnInfo));
   conn->error[0]='\0';
+	conn->buf_id = idx;
 
   conn->easy = curl_easy_init();
   if ( !conn->easy )
@@ -335,8 +397,8 @@ static void new_conn(char *url, GlobalInfo *g )
   curl_easy_setopt(conn->easy, CURLOPT_VERBOSE, 1L); // Very useful for libcurl and/or protocol debugging and understanding.
 	//curl_easy_setopt(conn->easy, CURLOPT_LOW_SPEED_TIME, 3L);
   //curl_easy_setopt(conn->easy, CURLOPT_LOW_SPEED_LIMIT, 10L);
-	curl_easy_setopt(conn->easy, CURLOPT_PROGRESSFUNCTION, prog_cb);
-  curl_easy_setopt(conn->easy, CURLOPT_PROGRESSDATA, conn);
+	//curl_easy_setopt(conn->easy, CURLOPT_PROGRESSFUNCTION, prog_cb);
+  //curl_easy_setopt(conn->easy, CURLOPT_PROGRESSDATA, conn);
 #endif
   curl_easy_setopt(conn->easy, CURLOPT_ERRORBUFFER, conn->error);
   curl_easy_setopt(conn->easy, CURLOPT_PRIVATE, conn);
@@ -409,13 +471,34 @@ static int init_fifo (GlobalInfo *g)
   return(0);
 }
 
+	/* test purpose
+	*/
+int test_case()
+{
+	memset(&g_maxBufWebPage, 0, sizeof(MaxBufWebPage)*WEBPAGE_BUF_SIZE);
+	
+	int i=0;
+	for(i=0; i<100000; ++i) {
+		int idx = get_free_buf_id();
+		if (idx >= WEBPAGE_BUF_SIZE) fprintf(MSG_OUT, "error: %d", idx);
+		else if (idx < 0) fprintf(MSG_OUT, "error: %d", idx);
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
+  unsigned int iseed = (unsigned int)time(NULL);
+  srand (iseed);
+	
+	return test_case();
+	
   GlobalInfo g;
   CURLMcode rc;
   (void)argc;
   (void)argv;
 
+	memset(&g_maxBufWebPage, 0, sizeof(MaxBufWebPage)*WEBPAGE_BUF_SIZE);
   memset(&g, 0, sizeof(GlobalInfo));
   g.loop = ev_default_loop(0);
 
