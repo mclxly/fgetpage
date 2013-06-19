@@ -186,14 +186,18 @@ static void check_multi_info(GlobalInfo *g)
       res = msg->data.result;
       curl_easy_getinfo(easy, CURLINFO_PRIVATE, &conn);
       curl_easy_getinfo(easy, CURLINFO_EFFECTIVE_URL, &eff_url);
+			
+			g_maxBufWebPage[conn->buf_id].content[g_maxBufWebPage[conn->buf_id].cont_len] = '\0';
+			
 #ifdef DEBUG
-      fprintf(MSG_OUT, "DONE: %s => (%d) %s\n", eff_url, res, conn->error);
+      fprintf(MSG_OUT, "DONE: %s => (%d) %s\n%s\n%d\n", eff_url, res, conn->error, g_maxBufWebPage[conn->buf_id].content, g_maxBufWebPage[conn->buf_id].cont_len);
 #endif
 
 /*************************************************
 	Save web page to Memcached.
 *************************************************/
 // ----------------------------------------------start
+			
 // ----------------------------------------------end
 
       curl_multi_remove_handle(g->multi, easy);
@@ -325,6 +329,13 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *data)
   (void)conn;
 	
 	//printf("len: %d body: %s\n", conn->cont_len, conn->content);  
+	char *buf = g_maxBufWebPage[conn->buf_id].content + g_maxBufWebPage[conn->buf_id].cont_len;
+	if (g_maxBufWebPage[conn->buf_id].cont_len + realsize < MAX_WEBPAGE_SIZE) {
+		memcpy(buf, ptr, realsize);
+		g_maxBufWebPage[conn->buf_id].cont_len += realsize;
+	} else {
+		g_maxBufWebPage[conn->buf_id].cont_len = 0;
+	}
 	
   return realsize;
 }
@@ -478,7 +489,7 @@ int test_case()
 	memset(&g_maxBufWebPage, 0, sizeof(MaxBufWebPage)*WEBPAGE_BUF_SIZE);
 	
 	int i=0;
-	for(i=0; i<100000; ++i) {
+	for(i=0; i<10; ++i) {
 		int idx = get_free_buf_id();
 		if (idx >= WEBPAGE_BUF_SIZE) fprintf(MSG_OUT, "error: %d", idx);
 		else if (idx < 0) fprintf(MSG_OUT, "error: %d", idx);
@@ -491,7 +502,7 @@ int main(int argc, char **argv)
   unsigned int iseed = (unsigned int)time(NULL);
   srand (iseed);
 	
-	return test_case();
+	//return test_case();
 	
   GlobalInfo g;
   CURLMcode rc;
